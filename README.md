@@ -1,154 +1,64 @@
+Fine-Tuning DeepSeek-R1-Distill-Qwen-1.5B for Healthcare Discharge Summaries
+
 Introduction
-In this blog post, we will explore high-level steps to fine-tune a large language model, specifically selecting the DeepSeek-R1-Distill-Qwen-1.5B for generating patient discharge summaries tailored to healthcare needs. We wll discuss why fine-tuning is crucial for improving model accuracy and relevance compared to alternatives like Retrieval-Augmented Generation (RAG). Key steps, including installation, quantization, and LoRA, will be highlighted with code snippets
 
-Sample Dataset overview
-Sample Dataset Overview The sample dataset consists of patient records (artificially generated) like the below, each with a concise clinical note and a corresponding detailed discharge summary. Here is an example from the dataset:
+This project outlines high-level steps to fine-tune the DeepSeek-R1-Distill-Qwen-1.5B large language model specifically to generate patient discharge summaries tailored for healthcare settings. Fine-tuning significantly improves the model's accuracy and relevance compared to methods like Retrieval-Augmented Generation (RAG). Key concepts covered include model installation, quantization, parameter-efficient fine-tuning using LoRA, and critical hyperparameter tuning.
 
-Clinical Note: “36 y/o female, adm 2025-03-07, c/o headache x 1 week. Dx: appendicitis. PMH: hyperlipidemia. Tx: azithromycin 500 mg x 1 then 250 mg QD x 4 days, albuterol PRN. CT scan: 90% RCA occlusion. Labs: CRP 15 mg/L. D/c 2025-03-07.”
+Sample Dataset Overview
 
-Discharge Summary: “Ms. Joseph Morton, 36, was admitted on 2025-03-07 with headache for 1 week, diagnosed with appendicitis. History of hyperlipidemia. Treated with azithromycin 500 mg x 1 then 250 mg QD x 4 days, albuterol PRN. CT scan revealed 90% RCA occlusion. Labs indicated CRP 15 mg/L. Discharged on 2025-03-07. Follow up with your cardiologist in 1 week.”
+The provided sample dataset consists of artificially generated patient records, each featuring a concise clinical note paired with a detailed discharge summary. This represents a sequence-to-sequence task where the model converts brief, technical clinical notes into structured, clear summaries.
 
-This dataset represents a sequence-to-sequence task where the model must transform short, jargon-heavy notes into structured, patient-friendly summaries.
+Example:
 
-Step-by-Step Guide to Fine-Tuning
-I. Installing and Loading the Model from Hugging Face First, set up the environment and load the model and tokenizer from Hugging Face.
+Clinical Note:
 
-!pip install transformers torch peft bitsandbytes
+"36 y/o female, adm 2025-03-07, c/o headache x 1 week. Dx: appendicitis. PMH: hyperlipidemia. Tx: azithromycin 500 mg x 1 then 250 mg QD x 4 days, albuterol PRN. CT scan: 90% RCA occlusion. Labs: CRP 15 mg/L. D/c 2025-03-07."
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
+Discharge Summary:
 
-model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-auth_token = "hf_YourAuthTokenHere"  # Replace with your Hugging Face token
+"Ms. Joseph Morton, 36, was admitted on 2025-03-07 with headache for 1 week, diagnosed with appendicitis. History of hyperlipidemia. Treated with azithromycin 500 mg x 1 then 250 mg QD x 4 days, albuterol PRN. CT scan revealed 90% RCA occlusion. Labs indicated CRP 15 mg/L. Discharged on 2025-03-07. Follow up with your cardiologist in 1 week."
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    use_auth_token=auth_token,  # omit if the model is public
-    trust_remote_code=True      # required for models with custom code
-)
+Step-by-Step Fine-Tuning Guide
 
-tokenizer = AutoTokenizer.from_pretrained(
-    model_name,
-    trust_remote_code=True
-)
+1. Installing and Loading the Model
 
-input_text = "Clinical Note: 36 y/o female, adm 2025-03-07, c/o headache x 1 week."
-inputs = tokenizer(input_text, return_tensors="pt")
-outputs = model.generate(**inputs, max_new_tokens=50)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-Explanation:
+Begin by installing necessary libraries (transformers, torch, peft, and bitsandbytes) and load the DeepSeek-R1-Distill-Qwen-1.5B model and tokenizer from Hugging Face. Ensure to configure trust settings appropriately based on the model’s documentation.
 
-The transformers library provides tools to load pre-trained models and tokenizers. trust_remote_code=True is necessary if the model includes custom code from Hugging Face. The test inference checks if the model is working, though the output may not yet be healthcare-specific without fine-tuning.
+2. Quantization
 
-II. Using Quantization
+Quantization is used to reduce the memory footprint of the model and enhance inference speed by converting weights from high precision (32-bit floats) to lower precision (8-bit integers). Benefits include:
 
-Quantization reduces the models memory footprint and speeds up inference by lowering the precision of weights (e.g., from 32-bit floats to 8-bit integers).
+Reduced memory usage: Ideal for deployment in resource-constrained environments.
 
-Why Use Quantization? Reduced Memory Usage: Allows deployment on devices with limited resources, such as hospital servers or edge devices.
+Faster inference: Essential for real-time healthcare applications.
 
-Faster Inference: Speeds up prediction, which is vital for real-time healthcare applications.
+Energy efficiency: Lowers computational costs and improves sustainability.
 
-Energy Efficiency: Lowers computational costs, making it more sustainable.
+3. Implementing LoRA for Efficient Fine-Tuning
 
-from transformers import BitsAndBytesConfig
-import torch
+Low-Rank Adaptation (LoRA) fine-tunes the model efficiently by adding low-rank matrices to specific layers while keeping original weights frozen, significantly reducing computational and memory requirements. Important parameters:
 
-quant_config = BitsAndBytesConfig(
-    load_in_8bit=True,                # Use 8-bit precision
-    bnb_8bit_use_double_quant=True,   # Improves accuracy with double quantization
-    bnb_8bit_quant_type="nf8",        # Normal float 8-bit type
-    bnb_8bit_compute_dtype=torch.bfloat16  # Computation in bfloat16 for efficiency
-)
+Rank (r): Typically set to 8 or 16.
 
-print("Loading base model with quantization...")
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    token=auth_token,
-    trust_remote_code=True,
-    quantization_config=quant_config,
-    torch_dtype="auto",
-    device_map="auto"  # Automatically maps model to available devices
-)
-Explanation:
+Alpha: Usually starts around 32, adjustable based on task complexity.
 
-BitsAndBytesConfig configures the quantization settings. device_map=”auto” ensures the model is distributed across available GPUs or CPUs, optimizing resource use
+Target Modules: Focus primarily on attention layers such as q_proj and v_proj.
 
-III. Implementing LoRA for Efficient Fine-Tuning
+4. Hyperparameter Tuning
 
-LoRA (Low-Rank Adaptation) is a parameter-efficient technique that fine-tunes a model by adding low-rank matrices to specific layers while keeping the original weights frozen.
+Critical hyperparameters to fine-tune for optimal performance include:
 
-What is LoRA? LoRA approximates weight updates with a low-rank decomposition, training only a small subset of parameters. This reduces memory and computational requirements, making it ideal for fine-tuning large models like DeepSeek-R1-Distill-Qwen-1.5B on specialized tasks.
+Learning Rate: Recommended start at 2e-5, reduce if overfitting occurs.
 
-How to Choose LoRA Parameters Rank (r): Controls the capacity of adaptation. Start with r=8 or r=16; higher values increase expressiveness but require more memory. Alpha: Scaling factor for LoRA updates. A value of 32 is a good starting point; adjust based on task complexity. Target Modules: Focus on attention layers (e.g., q_proj, v_proj) where adaptation is most impactful. Optionally include feed-forward layers if needed.
+Batch Size: Typically 4 or 8; use gradient accumulation if memory constraints arise.
 
-from peft import PeftModel, LoraConfig, get_peft_model
+Epochs: Usually 3–5, monitoring validation loss closely.
 
-# Define LoRA configuration
-lora_config = LoraConfig(
-    r=16,                     # Rank of the low-rank matrices
-    lora_alpha=32,            # Scaling factor
-    target_modules=["q_proj", "v_proj"],  # Target attention layers
-    lora_dropout=0.1,         # Dropout for regularization
-    bias="none"               # No bias adaptation
-)
+5. Generating Discharge Summaries
 
-# Apply LoRA to the model
-model = get_peft_model(model, lora_config)
+After fine-tuning, the model will be capable of converting clinical notes into comprehensive discharge summaries. Evaluation and inference should be performed carefully to ensure the generated summaries meet clinical and documentation standards.
 
-# Print trainable parameters to verify
-model.print_trainable_parameters()
-Explanation:
+Conclusion
 
-PeftModel and LoraConfig are from the peft library, designed for parameter-efficient fine-tuning. target_modules specifies which layers to adapt; adjust based on the models architecture (check documentation if needed). print_trainable_parameters() confirms only LoRA parameters are trainable, keeping the base model frozen.
+Fine-tuning DeepSeek-R1-Distill-Qwen-1.5B with quantization and LoRA provides an effective solution for creating accurate and compliant patient discharge summaries. This approach improves upon traditional methods by internalizing medical knowledge, understanding clinical jargon, and ensuring security and compliance. Experimentation with the outlined techniques and dataset customization will optimize the model for specific healthcare documentation needs.
 
-IV. Fine-Tuning Hyperparameters Beyond LoRA, tuning additional hyperparameters ensures optimal performance.
-
-Key Hyperparameters Learning Rate: Start with 2e-5. Reduce to 1e-5 if the model overfits (e.g., training loss decreases but validation loss increases). Batch Size: Use 4 or 8, depending on GPU memory. Use gradient accumulation if memory is limited. Epochs: Train for 3-5 epochs; monitor validation loss to prevent overfitting.
-
-from transformers import TrainingArguments, Trainer
-
-# Sample dataset (convert to Dataset object in practice)
-dataset = [
-    {"input": "Clinical Note: 36 y/o female, adm 2025-03-07, c/o headache x 1 week. Dx: appendicitis. PMH: hyperlipidemia. Tx: azithromycin 500 mg x 1 then 250 mg QD x 4 days, albuterol PRN. CT scan: 90% RCA occlusion. Labs: CRP 15 mg/L. D/c 2025-03-07.",
-     "output": "Ms. Joseph Morton, 36, was admitted on 2025-03-07 with headache for 1 week, diagnosed with appendicitis. History of hyperlipidemia. Treated with azithromycin 500 mg x 1 then 250 mg QD x 4 days, albuterol PRN. CT scan revealed 90% RCA occlusion. Labs indicated CRP 15 mg/L. Discharged on 2025-03-07. Follow up with your cardiologist in 1 week."}
-    # Add other records here
-]
-
-# Define training arguments
-training_args = TrainingArguments(
-    output_dir="./fine_tuned_deepseek",
-    num_train_epochs=3,
-    per_device_train_batch_size=4,
-    learning_rate=2e-5,
-    save_steps=500,          # Save checkpoint every 500 steps
-    eval_steps=500,          # Evaluate every 500 steps
-    logging_dir="./logs",
-    logging_steps=10         # Log every 10 steps
-)
-
-# Initialize Trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=dataset,   # Replace with proper Dataset object
-    eval_dataset=dataset     # Optional validation split
-)
-
-# Start training
-trainer.train()
-TrainingArguments configures the training process. The dataset should be converted to a Dataset object using datasets library for real implementation. Monitor logs and evaluation metrics to adjust hyperparameters if needed.
-
-V. Generating Discharge Summaries After fine-tuning, the model can generate summaries from clinical notes.
-
-prompt = "Clinical Note: Patient presents with chest pain. Discharge Summary:"
-
-inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-
-model.eval()
-
-outputs = model.generate(**inputs, max_new_tokens=50)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-Explanation:
-
-model.eval() disables training-specific operations like dropout. max_new_tokens limits the output length; adjust based on desired summary detail.
-
-Conclusion Fine-tuning the DeepSeek-R1-Distill-Qwen-1.5B model with quantization and LoRA transforms it into a powerful tool for generating patient discharge summaries in healthcare. This approach outperforms RAG by internalizing medical knowledge, understanding jargon, ensuring security, and producing compliant documentation. The provided code snippets covering model loading, quantization, LoRA, hyperparameter tuning, and inference offer a practical starting point. Experiment with these techniques and the sample dataset to optimize performance for your specific healthcare use-case. By leveraging fine-tuning, you can create a tailored, efficient, and secure solution that meets the demands of modern healthcare documentation.
